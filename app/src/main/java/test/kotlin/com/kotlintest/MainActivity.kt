@@ -3,13 +3,13 @@ package test.kotlin.com.kotlintest
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.os.Handler
 import android.preference.PreferenceManager
 import android.support.v4.app.ActivityCompat
 import android.support.v4.content.ContextCompat
 import android.support.v7.app.AppCompatActivity
 import android.util.Log
 import android.view.View
+import android.widget.TextView
 import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapController
@@ -32,13 +32,11 @@ class MainActivity : AppCompatActivity() {
     private val MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE: Int = 6
 
     private var mDb: AppDatabase? = null
-
-    private lateinit var mDbWorkerThread: DbWorkerThread
-    private val mUiHandler = Handler()
-
     private var map: MapView? = null
     private var mMapController: MapController? = null
     private var mLocationOverlay: MyLocationNewOverlay? = null
+
+    private var textView: TextView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkPermissions()
@@ -57,6 +55,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         map = findViewById<View>(R.id.map) as MapView
+        textView = findViewById(R.id.textView)
+
         map?.setBuiltInZoomControls(false)
         map?.setMultiTouchControls(true)
         mMapController = map?.controller as MapController
@@ -80,20 +80,19 @@ class MainActivity : AppCompatActivity() {
      * Using thread to create and get entities
      */
     private fun databaseStuff() {
-        mDbWorkerThread = DbWorkerThread("dbWorkerThread")
-        mDbWorkerThread.start()
-
         mDb = AppDatabase.getInstance(this)
-
-        insertPersonDataInDb(createRandomPerson())
-        fetchPersonDataFromDb()
+        Thread(Runnable {
+            // a potentially  time consuming task
+            mDb?.personDataDao()?.insert(createRandomPerson())
+            mDb?.personDataDao()?.insert(createRandomPerson())
+            val personData =
+                    mDb?.personDataDao()?.getAll()
+            showData(personData)
+        }).start()
     }
 
     public override fun onResume() {
         super.onResume()
-        if (!mDbWorkerThread.isAlive) {
-            mDbWorkerThread.start()
-        }
         mLocationOverlay?.enableMyLocation()
         map?.onResume() //needed for compass, my location overlays, v6.0.0 and up
 
@@ -101,7 +100,6 @@ class MainActivity : AppCompatActivity() {
 
     public override fun onPause() {
         super.onPause()
-        mDbWorkerThread.interrupt()
         //this will refresh the osmdroid configuration on resuming.
         //if you make changes to the configuration, use
         //SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
@@ -110,42 +108,17 @@ class MainActivity : AppCompatActivity() {
         map?.onPause()  //needed for compass, my location overlays, v6.0.0 and up
     }
 
-    override fun onDestroy() {
-        mDbWorkerThread.quit()
-        super.onDestroy()
-    }
-
     private fun showData(personData: List<PersonData>?) {
         if (personData != null) {
             for (person in personData) {
+                textView?.text = person.firstName
                 Log.d("Person " + person.id + ": ", person.firstName + " " + person.lastName + ": " + person.age + " -> created at " + person.creationDate)
             }
         }
     }
 
-    private fun fetchPersonDataFromDb() {
-        val task = Runnable {
-            val personData =
-                    mDb?.personDataDao()?.getAll()
-            mUiHandler.post {
-                if (personData == null || personData.isEmpty()) {
-                    Log.d("DAO", "No data in cache..!!")
-                } else {
-                    this.showData(personData)
-                }
-            }
-        }
-        mDbWorkerThread.postTask(task)
-    }
-
-    private fun insertPersonDataInDb(personData: PersonData) {
-
-        val task = Runnable { mDb?.personDataDao()?.insert(personData) }
-        mDbWorkerThread.postTask(task)
-    }
-
     private fun createRandomPerson(): PersonData {
-        var date: Date = Date(2018, 7, 12)
+        var date = Date(2018, 7, 12)
         return PersonData("Lucas", "Bled", 26, date)
     }
 
